@@ -1,0 +1,83 @@
+name: Build GKI 6.6 Kernel (KSU-Next v3.4.2 + Droidspaces)
+
+on:
+  workflow_dispatch:
+    inputs:
+      sublevel:
+        description: 'Kernel Sublevel (sesuai screenshot: 118)'
+        required: true
+        default: '118'
+
+jobs:
+  build-kernel:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Maximize Build Space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h
+
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bc bison build-essential ccache curl flex git libssl-dev libelf-dev python3 python-is-python3 unzip wget zip zstd lz4 pahole
+
+      - name: Setup Repo Tool & Clone GKI 6.6 Source
+        run: |
+          mkdir -p ~/bin && curl https://storage.googleapis.com/git-repo-downloads/repo > ~/bin/repo && chmod a+x ~/bin/repo
+          export PATH=~/bin:$PATH
+          mkdir kernel_build && cd kernel_build
+          repo init -u https://android.googlesource.com/kernel/manifest -b common-android15-6.6 --depth=1
+          repo sync -c -j$(nproc --all) --no-tags --no-clone-bundle
+
+      - name: Integrate KernelSU-Next v3.4.2
+        run: |
+          cd kernel_build/common
+          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s v3.4.2
+
+      - name: Enable Droidspaces & KSU Configs
+        run: |
+          cd kernel_build/common
+          DEFCONFIG="arch/arm64/configs/gki_defconfig"
+          cat << 'EOF' >> $DEFCONFIG
+          CONFIG_KSU=y
+          CONFIG_KPROBES=y
+          CONFIG_HAVE_KPROBES=y
+          CONFIG_KPROBE_EVENTS=y
+          CONFIG_OVERLAY_FS=y
+          CONFIG_NAMESPACES=y
+          CONFIG_PID_NS=y
+          CONFIG_NET_NS=y
+          CONFIG_IPC_NS=y
+          CONFIG_UTS_NS=y
+          CONFIG_FUSE_FS=y
+          CONFIG_TUN=y
+          CONFIG_BRIDGE=y
+          CONFIG_VETH=y
+          # CONFIG_USER_NS is not set
+          EOF
+
+      - name: Build Kernel Image.gz
+        run: |
+          cd kernel_build
+          export PATH="$PWD/prebuilts/clang/host/linux-x86/clang-r510928/bin:$PATH"
+          cd common
+          make O=out ARCH=arm64 LLVM=1 LLVM_IAS=1 gki_defconfig
+          make -j$(nproc --all) O=out ARCH=arm64 LLVM=1 LLVM_IAS=1 Image.gz
+
+      - name: Package AnyKernel3
+        run: |
+          git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git AnyKernel3
+          cp kernel_build/common/out/arch/arm64/boot/Image.gz AnyKernel3/
+          cd AnyKernel3
+          sed -i 's/do.devicecheck=1/do.devicecheck=0/g' anykernel.sh
+          sed -i 's/block=\/dev\/block\/platform\/omap\/omap_hsmmc.0\/by-name\/boot;/block=auto;/g' anykernel.sh
+          sed -i 's/is_slot_device=0;/is_slot_device=1;/g' anykernel.sh
+          zip -r9 ../GKI-6.6-KSUNext3.4.2-Droidspaces.zip * -x .git README.md *placeholder
+
+      - name: Upload Kernel Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: GKI-6.6-KSUNext3.4.2-Droidspaces
+          path: GKI-6.6-KSUNext3.4.2-Droidspaces.zip
+          
