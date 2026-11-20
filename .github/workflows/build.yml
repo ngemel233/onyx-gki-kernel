@@ -20,7 +20,7 @@ jobs:
       - name: Install Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y bc bison build-essential ccache curl flex git libssl-dev libelf-dev python3 python-is-python3 unzip wget zip zstd lz4 pahole
+          sudo apt-get install -y bc bison build-essential ccache curl flex git libssl-dev libelf-dev python3 python-is-python3 unzip wget zip zstd lz4
 
       - name: Setup Repo Tool & Clone GKI 6.6 Source
         run: |
@@ -60,9 +60,13 @@ jobs:
       - name: Build Kernel Image.gz
         run: |
           cd kernel_build
-          export PATH="$PWD/prebuilts/clang/host/linux-x86/clang-r510928/bin:$PATH"
+          CLANG_DIR=$(find "$PWD/prebuilts/clang/host/linux-x86" -maxdepth 1 -name "clang-r*" | sort -V | tail -n 1)
+          BUILD_TOOLS_DIR="$PWD/prebuilts/kernel-build-tools/linux-x86/bin"
+          export PATH="$CLANG_DIR/bin:$BUILD_TOOLS_DIR:$PATH"
           cd common
           make O=out ARCH=arm64 LLVM=1 LLVM_IAS=1 gki_defconfig
+          ./scripts/config --file out/.config -d DEBUG_INFO_BTF
+          make O=out ARCH=arm64 LLVM=1 LLVM_IAS=1 olddefconfig
           make -j$(nproc --all) O=out ARCH=arm64 LLVM=1 LLVM_IAS=1 Image.gz
 
       - name: Package AnyKernel3
@@ -80,4 +84,3 @@ jobs:
         with:
           name: GKI-6.6-KSUNext3.4.2-Droidspaces
           path: GKI-6.6-KSUNext3.4.2-Droidspaces.zip
-          
