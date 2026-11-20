@@ -1,12 +1,7 @@
-name: Build GKI 6.6 Kernel (KSU-Next v3.4.2 + Droidspaces)
+name: Build GKI 6.6.118 Exact KMI (KSU-Next v3.4.2 + Droidspaces)
 
 on:
   workflow_dispatch:
-    inputs:
-      sublevel:
-        description: 'Kernel Sublevel (sesuai screenshot: 118)'
-        required: true
-        default: '118'
 
 jobs:
   build-kernel:
@@ -27,8 +22,20 @@ jobs:
           mkdir -p ~/bin && curl https://storage.googleapis.com/git-repo-downloads/repo > ~/bin/repo && chmod a+x ~/bin/repo
           export PATH=~/bin:$PATH
           mkdir kernel_build && cd kernel_build
-          repo init -u https://android.googlesource.com/kernel/manifest -b common-android15-6.6 --depth=1
+          repo init -u https://android.googlesource.com/kernel/manifest -b common-android15-6.6
           repo sync -c -j$(nproc --all) --no-tags --no-clone-bundle
+
+      - name: Pin Kernel Version to 6.6.118 (Exact KMI Match)
+        run: |
+          cd kernel_build/common
+          COMMIT_118=$(git log --grep="6.6.118" --format="%H" -n 1)
+          if [ -n "$COMMIT_118" ]; then
+            git checkout $COMMIT_118
+          else
+            sed -i 's/^SUBLEVEL = .*/SUBLEVEL = 118/' Makefile
+          fi
+          rm -f localversion*
+          echo "-android15-8-g0908354dac1b-ab16143355-4k" > localversion
 
       - name: Integrate KernelSU-Next v3.4.2
         run: |
@@ -66,21 +73,39 @@ jobs:
           cd common
           make O=out ARCH=arm64 LLVM=1 LLVM_IAS=1 gki_defconfig
           ./scripts/config --file out/.config -d DEBUG_INFO_BTF
+          ./scripts/config --file out/.config -d LOCALVERSION_AUTO
           make O=out ARCH=arm64 LLVM=1 LLVM_IAS=1 olddefconfig
           make -j$(nproc --all) O=out ARCH=arm64 LLVM=1 LLVM_IAS=1 Image.gz
 
-      - name: Package AnyKernel3
+      - name: Package AnyKernel3 for POCO F7 (onyx)
         run: |
           git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git AnyKernel3
           cp kernel_build/common/out/arch/arm64/boot/Image.gz AnyKernel3/
+          cat << 'EOF' > AnyKernel3/anykernel.sh
+          ### AnyKernel3 Ramdisk Mod Script
+          properties() { '
+          kernel.string=GKI 6.6.118 (KSU-Next v3.4.2 + Droidspaces)
+          do.devicecheck=0
+          do.modules=0
+          do.systemless=1
+          do.cleanup=1
+          do.cleanuponabort=0
+          device.name1=onyx
+          '; }
+          BLOCK=boot;
+          IS_SLOT_DEVICE=1;
+          RAMDISK_COMPRESSION=auto;
+          PATCH_VBMETA_FLAG=auto;
+          . tools/ak3-core.sh;
+          split_boot;
+          flash_boot;
+          EOF
           cd AnyKernel3
-          sed -i 's/do.devicecheck=1/do.devicecheck=0/g' anykernel.sh
-          sed -i 's/block=\/dev\/block\/platform\/omap\/omap_hsmmc.0\/by-name\/boot;/block=auto;/g' anykernel.sh
-          sed -i 's/is_slot_device=0;/is_slot_device=1;/g' anykernel.sh
-          zip -r9 ../GKI-6.6-KSUNext3.4.2-Droidspaces.zip * -x .git README.md *placeholder
+          zip -r9 ../GKI-6.6.118-KSUNext3.4.2-Droidspaces.zip * -x .git README.md *placeholder
 
       - name: Upload Kernel Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: GKI-6.6-KSUNext3.4.2-Droidspaces
-          path: GKI-6.6-KSUNext3.4.2-Droidspaces.zip
+          name: GKI-6.6.118-KSUNext3.4.2-Droidspaces
+          path: GKI-6.6.118-KSUNext3.4.2-Droidspaces.zip
+          
